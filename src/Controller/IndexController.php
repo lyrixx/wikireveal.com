@@ -90,7 +90,7 @@ class IndexController extends AbstractController
     #[Route(path: '/{_locale}')]
     public function wikireveal(Request $request, string $assetVersion = 'assets'): Response
     {
-        $debug = false;
+        $debug = $request->query->getBoolean('debug', false);
         $lang = $request->getLocale();
         $dateInt = (int) (new \DateTimeImmutable())->format('Ymd');
         $puzzleId = $lang.'-'.$dateInt;
@@ -112,14 +112,14 @@ class IndexController extends AbstractController
         // To win the player has to find all the meaningful words of the subject,
         // so we are filtering the others.
         $subject = $this->decodeSubject($article);
-        $encodedSubject = $this->getEncoded($subject);
         $winTokens = $this->tokenize($subject);
         // Remove one-letter and non-alphabetical tokens: https://regex101.com/r/jVVLjx/1
         $winTokens = array_filter($winTokens, fn (string $e) => !preg_match('/^(.|[^a-z]+?)$/misu', $e));
         $winTokens = array_filter($winTokens, fn (string $e) => false === $language->isPonctuation($e));
         $winTokens = array_map($language->normalize(...), $winTokens);
-        $winTokens = array_map($this->getHash(...), $winTokens);
-        $winTokens = array_values($winTokens);
+        $winTokensAsString = implode('', $winTokens);
+        $winTokenHashes = array_map($this->getHash(...), $winTokens);
+        $winTokenHashes = array_values($winTokenHashes);
 
         $wikiHtml = $pageHtml['parse']['text'];
 
@@ -132,6 +132,8 @@ class IndexController extends AbstractController
         $tokens = $this->tokenize($pureHtml);
 
         $outputs = [];
+        $variationMaps = [];
+        $allUniqueTokens = [];
         foreach ($tokens as $token) {
             if ($this->isHtmlMarkup($token)) {
                 $outputs[] = $token;
@@ -140,27 +142,30 @@ class IndexController extends AbstractController
             } else {
                 $normalized = $language->normalize($token);
                 $size = $this->getSize($token);
-                $encoded = $this->getEncoded($token);
+                $allUniqueTokens[$token] ??= $this->encrypt($token, $winTokensAsString);
+                $variationMaps = $this->updateVariationMaps($variationMaps, $normalized, $language);
                 $placeholder = $this->getPlaceholder($size);
                 /* @phpstan-ignore-next-line */
                 if ($debug) {
-                    $hashes = implode('|', $language->variations($normalized));
-                    $outputs[] = '<span data-hash="'.$hashes.'" class="wz-w-hide" data-size="'.$size.'" data-word="'.$encoded.'">'.$token.'</span>';
+                    $hash = $normalized;
+                    $outputs[] = '<span data-hash="'.$hash.'" class="wz-w-hide" data-size="'.$size.'">'.$token.'</span>';
                 } else {
-                    $hashes = implode('|', array_map($this->getHash(...), $language->variations($normalized)));
-                    $outputs[] = '<span data-hash="'.$hashes.'" class="wz-w-hide" data-size="'.$size.'" data-word="'.$encoded.'">'.$placeholder.'</span>';
+                    $hash = $this->getHash($normalized);
+                    $outputs[] = '<span data-hash="'.$hash.'" class="wz-w-hide" data-size="'.$size.'">'.$placeholder.'</span>';
                 }
             }
         }
+
+        $variationMaps[implode('', $winTokenHashes)] = array_values($allUniqueTokens);
 
         return $this->render('wikireveal.html.twig', [
             'asset_version_major' => $assetVersion,
             'lang' => $lang,
             'outputs' => $outputs,
             'puzzle_id' => $puzzleId,
-            'encoded_subject' => $encodedSubject,
+            'variation_maps' => $variationMaps,
             'common_words' => $language->commonWords(),
-            'win_hashes' => $winTokens,
+            'win_hashes' => $winTokenHashes,
             'ui_messages' => [
                 'victory' => $this->translator->trans('message.victory'),
                 'already_sent' => $this->translator->trans('error.already_sent'),
@@ -169,6 +174,35 @@ class IndexController extends AbstractController
                 'share_error' => $this->translator->trans('error.share_error'),
             ],
         ]);
+    }
+
+    private function updateVariationMaps(array $variationMaps, string $normalized, LanguageInterface $language): array
+    {
+        $normalizedHashed = $this->getHash($normalized);
+        if (\array_key_exists($normalizedHashed, $variationMaps)) {
+            return $variationMaps;
+        }
+
+        $variations = $this->uniqueVariations($language, $normalized);
+        $variationMaps[$normalizedHashed] = array_map(fn ($variation) => $this->encrypt($variation, $normalized), $variations);
+        foreach ($variations as $variation) {
+            $variationHashed = $this->getHash($variation);
+
+            $subVariations = $this->uniqueVariations($language, $variation);
+            $variationMaps[$variationHashed] = array_map(fn ($v) => $this->encrypt($v, $variation), $subVariations);
+        }
+
+        return $variationMaps;
+    }
+
+    private function uniqueVariations(LanguageInterface $language, string $normalized): array
+    {
+        $variations = array_flip($language->variations($normalized));
+        unset($variations[$normalized]);
+        $variations = array_keys($variations);
+        $variations = array_map($language->normalize(...), $variations);
+
+        return $variations;
     }
 
     private function isHtmlMarkup(string $candidate): bool
@@ -408,5 +442,26 @@ class IndexController extends AbstractController
         }
 
         return null;
+    }
+
+    private function encrypt(string $value, string $passphrase): array
+    {
+        $salt = openssl_random_pseudo_bytes(8);
+        $salted = '';
+        $dx = '';
+        while (\mb_strlen($salted) < 48) {
+            $dx = md5($dx.$passphrase.$salt, true);
+            $salted .= $dx;
+        }
+        $key = mb_substr($salted, 0, 32);
+        $iv = mb_substr($salted, 32, 16);
+        $encrypted_data = openssl_encrypt($value, 'aes-256-cbc', $key, true, $iv);
+        $data = [
+            'ct' => base64_encode($encrypted_data),
+            'iv' => bin2hex($iv),
+            's' => bin2hex($salt),
+        ];
+
+        return $data;
     }
 }
