@@ -106,12 +106,15 @@ class IndexController extends AbstractController
             throw $this->createNotFoundException('This language is not available yet.');
         }
 
-        // $pageHtml = $this->cache('pageHtml-'.$puzzleId.'.json', fn () => $this->getPageHtml($article, $lang));
-        $pageHtml = ['parse' => ['text' =>
-            <<<HTML
-                Le Chat et la Souris sont amis. LA souris est gentille
-            HTML
-        ]];
+        $article = 'Calvinisme';
+
+        // $pageHtml = ['parse' => ['text' =>
+        //     <<<HTML
+        //         Le Chat et la Souris sont amis. LA souris est gentille.
+        //         Les amis c'est cool. les autres aussi.
+        //     HTML
+        // ]];
+        $pageHtml = $this->cache('pageHtml-'.$puzzleId.'.json', fn () => $this->getPageHtml($article, $lang));
         if (!isset($pageHtml['parse']['text'])) {
             throw new \RuntimeException((string) json_encode($pageHtml['error'] ?? ['Malformed JSON Content.']));
         }
@@ -157,7 +160,6 @@ class IndexController extends AbstractController
         }
 
         $solutionChecker = $this->solutionCheckerBuilder->buildSolutionChecker($lang, $tokens, $winTokens);
-        dd($solutionChecker);
 
         return $this->render('wikireveal.html.twig', [
             'asset_version_major' => $assetVersion,

@@ -323,7 +323,7 @@
     guessInput.value = '';
   };
 
-  const insertVariations = (word) => {
+  const insertVariations = (word, highlight = true) => {
     const normalized = normalize(word);
     const hash = sha1(normalized).substring(0, 10);
 
@@ -345,13 +345,16 @@
 
         log(`Add variation "${variation}" ...`);
 
-        const variationNormalized = normalize(variation);
-        const variationHash = sha1(variationNormalized).substring(0, 10);
+        const variationHash = sha1(variation).substring(0, 10);
 
-        count += revealHash(variationHash, variationNormalized);
+        count += revealHash(variationHash, variation);
 
-        highlight(variationHash);
+        if (highlight) {
+          highlight(variationHash);
+        }
       });
+    } else {
+      log(`No variations found for "${word}"`);
     }
 
     return count;
@@ -366,7 +369,7 @@
     const hash = insertWord(word);
     revealHash(hash, word);
 
-    // insertVariations(word);
+    insertVariations(word, false);
   };
 
   /**
