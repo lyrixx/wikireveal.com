@@ -9,9 +9,8 @@
   // From template
   const { uiMessages } = window;
   const { commonWords } = window;
-  const { winHashes } = window;
   const { puzzleId } = window;
-  const { variationMaps } = window;
+  const { solutionChecker } = window;
 
   // State
   const hashes = [];
@@ -143,14 +142,16 @@
 
     let rootPassword = '';
     let rootId = '';
-    winHashes.forEach((element) => {
+    solutionChecker.winHashes.forEach((element) => {
       rootPassword += winFoundHashes[element];
       rootId += element;
     });
 
     console.log(rootId, rootPassword);
 
-    variationMaps[rootId].forEach((variationEncrypted) => {
+    return;
+
+    variationsMap[rootId].forEach((variationEncrypted) => {
       const cipherParams = CryptoJS.lib.CipherParams.create({
         ciphertext: CryptoJS.enc.Base64.parse(variationEncrypted.ct),
         iv: CryptoJS.enc.Hex.parse(variationEncrypted.iv),
@@ -245,13 +246,12 @@
    * @return {string} The hash
    */
   const insertWord = (word) => {
-    const normalized = normalize(word);
-    const hash = sha1(normalized).substring(0, 10);
+    const hash = sha1(word).substring(0, 10);
 
     hashes.push(hash);
 
-    if (winHashes.includes(hash)) {
-      winFoundHashes[hash] = normalized;
+    if (solutionChecker.winHashes.includes(hash)) {
+      winFoundHashes[hash] = normalize(word);
     }
 
     return hash;
@@ -284,7 +284,7 @@
     insertWord(word);
 
     // Win condition
-    if (winHashes.length === Object.keys(winFoundHashes).length) {
+    if (solutionChecker.winHashes.length === Object.keys(winFoundHashes).length) {
       showMessageToUser(uiMessages.victory, true);
       revealAll();
     }
@@ -293,8 +293,46 @@
 
     let count = revealHash(hash, word);
 
-    if (variationMaps[hash] !== undefined) {
-      variationMaps[hash].forEach((variationEncrypted) => {
+    count += insertVariations(word);
+
+    // if (variationsMap[hash] !== undefined) {
+    //   variationsMap[hash].forEach((variationEncrypted) => {
+    //     const cipherParams = CryptoJS.lib.CipherParams.create({
+    //       ciphertext: CryptoJS.enc.Base64.parse(variationEncrypted.ct),
+    //       iv: CryptoJS.enc.Hex.parse(variationEncrypted.iv),
+    //       salt: CryptoJS.enc.Hex.parse(variationEncrypted.s),
+    //     })
+    //     const variation = CryptoJS.AES
+    //       .decrypt(cipherParams, normalized)
+    //       .toString(CryptoJS.enc.Utf8)
+    //     ;
+
+    //     log(`Add variation "${variation}" ...`);
+
+    //     const variationNormalized = normalize(variation);
+    //     const variationHash = sha1(variationNormalized).substring(0, 10);
+
+    //     count += revealHash(variationHash, variationNormalized);
+
+    //     highlight(variationHash);
+    //   });
+    // }
+
+    addToList(hash, hashes.length - commonWords.length, word, count);
+
+    guessInput.value = '';
+  };
+
+  const insertVariations = (word) => {
+    const normalized = normalize(word);
+    const hash = sha1(normalized).substring(0, 10);
+
+    let count = 0;
+
+    if (solutionChecker.variationsMap[hash] !== undefined) {
+      solutionChecker.variationsMap[hash].forEach((variationHashed) => {
+        variationEncrypted = solutionChecker.hashToEncrypted[`${hash}:${variationHashed}`];
+
         const cipherParams = CryptoJS.lib.CipherParams.create({
           ciphertext: CryptoJS.enc.Base64.parse(variationEncrypted.ct),
           iv: CryptoJS.enc.Hex.parse(variationEncrypted.iv),
@@ -316,10 +354,8 @@
       });
     }
 
-    addToList(hash, hashes.length - commonWords.length, word, count);
-
-    guessInput.value = '';
-  };
+    return count;
+  }
 
   /**
    * Reveal the given common word
@@ -329,6 +365,8 @@
     log(`Add "${word}" to common words`);
     const hash = insertWord(word);
     revealHash(hash, word);
+
+    // insertVariations(word);
   };
 
   /**
@@ -340,7 +378,7 @@
     const hash = insertWord(word);
 
     // Win condition
-    if (winHashes.length === 0) {
+    if (solutionChecker.winHashes.length === 0) {
       showMessageToUser(uiMessages.victory, true);
       revealAll();
     }
